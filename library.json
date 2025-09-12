@@ -1,0 +1,25 @@
+{
+    "authors": [
+        {
+            "maintainer": true,
+            "name": "Subham Gupta",
+            "url": "https://github.com/subhamgupta28"
+        }
+    ],
+    "description": "Automata Library for IOT automation",
+    "export": {
+        "exclude": [
+            "tests"
+        ]
+    },
+    "frameworks": "arduino",
+    "keywords": "wifi, http, web, server, client, websocket",
+    "license": "",
+    "name": "Automata",
+    "platforms": "atmelavr, espressif8266, espressif32, raspberrypi",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/subhamgupta28/ArduinoAutomata.git"
+    },
+    "version": "2.8.15"
+}
