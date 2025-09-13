@@ -150,7 +150,6 @@ void Automata::handleWebServer()
 
 Preferences Automata::getPreferences()
 {
-    Serial.println("[Automata] getPreferences()");
     return preferences;
 }
 
@@ -298,7 +297,7 @@ void Automata::setOTA()
 void Automata::sendLive(JsonDocument data)
 {
     String payload = serializeJsonDoc(data);
-    mqttClient.publish(makeTopic("sendLiveData").c_str(), payload.c_str());
+    mqttClient.publish(makeTopic("sendLiveData").c_str(), payload.c_str(), 0);
 
     String json;
     serializeJson(data, json);
@@ -307,16 +306,16 @@ void Automata::sendLive(JsonDocument data)
 
 void Automata::sendData(JsonDocument doc)
 {
-    Serial.println("[Automata] sendData()");
+    Serial.print("[Automata] sendData(): ");
     String payload = serializeJsonDoc(doc);
-    mqttClient.publish(makeTopic("sendData").c_str(), payload.c_str());
+    Serial.println(mqttClient.publish(makeTopic("sendData").c_str(), payload.c_str()));
 }
 
 void Automata::sendAction(JsonDocument doc)
 {
-    Serial.println("[Automata] sendAction()");
+    Serial.print("[Automata] sendAction(): ");
     String payload = serializeJsonDoc(doc);
-    mqttClient.publish(makeTopic("action").c_str(), payload.c_str());
+    Serial.println(mqttClient.publish(makeTopic("action").c_str(), payload.c_str()));
 }
 
 String Automata::serializeJsonDoc(JsonDocument &doc)
@@ -415,9 +414,8 @@ void Automata::mqttConnect()
     mqttClient.setCallback([](char *topic, byte *payload, unsigned int length)
                            { Automata::instance->mqttCallback(topic, payload, length); });
 
-    mqttClient.setBufferSize(1024);
+    mqttClient.setBufferSize(2048);
     mqttClient.setKeepAlive(30);
-
     if (!mqttClient.connected())
     {
         String clientId = "automata-" + convertToLowerAndUnderscore(deviceName) + "-" + macAddr;
