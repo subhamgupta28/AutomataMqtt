@@ -15,11 +15,13 @@
 #include <vector>
 #define MQTT_MAX_PACKET_SIZE 2048
 
-struct Action {
+struct Action
+{
     JsonDocument data;
 };
 
-struct Attribute {
+struct Attribute
+{
     String key;
     String displayName;
     String unit;
@@ -74,17 +76,16 @@ const char index_html[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-class Automata {
+class Automata
+{
 public:
     using HandleAction = std::function<void(Action)>;
     using HandleDelay = std::function<void(void)>;
 
-    Automata(String deviceName, const char* HOST, int PORT);
+    Automata(String deviceName, const char *HOST, int PORT);
 
     void begin();
-    void loop();
-    void configureWiFi();
-    void handleWebServer();
+
     Preferences getPreferences();
     void addAttribute(String key, String displayName, String unit, String type = "INFO", JsonDocument extras = JsonDocument());
     void registerDevice();
@@ -93,14 +94,18 @@ public:
     void sendAction(JsonDocument doc);
     void onActionReceived(HandleAction cb);
     void delayedUpdate(HandleDelay hd);
-    String getMacAddress();
+    
     int getDelay();
 
-    static Automata* instance;
+    static Automata *instance;
 
 private:
+    void loop();
+    void configureWiFi();
+    String getMacAddress();
+    void handleWebServer();
     String deviceName;
-    const char* HOST;
+    const char *HOST;
     int PORT;
     String deviceId;
     String macAddr;
@@ -113,31 +118,31 @@ private:
     WiFiClient espClient;
     PubSubClient mqttClient;
     String mqttBaseTopic = "automata";
-    const char* mqttUser = "mqttadmin";
-    const char* mqttPassword = "12345678";
+    const char *mqttUser = "mqttadmin";
+    const char *mqttPassword = "12345678";
 
     HandleAction _handleAction;
     HandleDelay _handleDelay;
     std::vector<Attribute> attributeList;
     unsigned long previousMillis = 0;
     int d = 60000; // default delay
-    const char* ntpServer = "pool.ntp.org";
+    const char *ntpServer = "pool.ntp.org";
 
     // Helpers
     String convertToLowerAndUnderscore(String input);
     char toLowerCase(char c);
     void keepWiFiAlive();
     void setOTA();
-    bool sendHttp(const String& output, const String& endpoint, String& result);
+    bool sendHttp(const String &output, const String &endpoint, String &result);
     void getConfig();
-    String getIdByName(const String& input, const String& searchName);
+    String getIdByName(const String &input, const String &searchName);
 
     // MQTT
     void mqttConnect();
-    void mqttCallback(char* topic, byte* payload, unsigned int length);
-    String makeTopic(const String& subtopic);
+    void mqttCallback(char *topic, byte *payload, unsigned int length);
+    String makeTopic(const String &subtopic);
     void subscribeToDeviceTopics();
-    String serializeJsonDoc(JsonDocument& doc);
+    String serializeJsonDoc(JsonDocument &doc);
     JsonDocument parseString(String str);
 };
 

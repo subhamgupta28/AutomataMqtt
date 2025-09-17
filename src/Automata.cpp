@@ -11,7 +11,6 @@ Automata::Automata(String deviceName, const char *HOST, int PORT)
       mqttClient(espClient)
 {
     instance = this;
-    Serial.println("[Automata] Constructor called");
 }
 
 String Automata::convertToLowerAndUnderscore(String input)
@@ -85,8 +84,6 @@ void Automata::configureWiFi()
 
 void Automata::begin()
 {
-    Serial.println("[Automata] begin()");
-
     WiFi.mode(WIFI_STA);
     WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
     WiFi.setHostname(convertToLowerAndUnderscore(deviceName).c_str());
@@ -100,12 +97,11 @@ void Automata::begin()
 
     xTaskCreate([](void *params)
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
-                "keepWiFiAlive", 4096, this, 2, NULL);
+                "keepWiFiAlive", 4096, this, 3, NULL);
 }
 
 void Automata::getConfig()
 {
-    Serial.println("[Automata] getConfig()");
     String sv = preferences.getString("config", "");
     if (sv != "")
     {
@@ -122,7 +118,6 @@ void Automata::getConfig()
 
 void Automata::handleWebServer()
 {
-    Serial.println("[Automata] handleWebServer()");
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
               { request->send(200, "text/html", index_html); });
 
@@ -194,8 +189,6 @@ bool Automata::sendHttp(const String &output, const String &endpoint, String &re
 
 void Automata::keepWiFiAlive()
 {
-    Serial.println("[Automata] keepWiFiAlive() task started");
-
     const TickType_t delayConnected = 30000 / portTICK_PERIOD_MS;
     const TickType_t delayDisconnected = 5000 / portTICK_PERIOD_MS;
 
@@ -221,13 +214,9 @@ void Automata::keepWiFiAlive()
         }
         else
         {
-            if (!mqttClient.connected() && isDeviceRegistered)
-            {
-                Serial.println("[Automata] MQTT not connected, reconnecting...");
-                mqttConnect();
-            }
-            vTaskDelay(delayConnected);
+            loop();
         }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 long regTime = millis();
@@ -236,36 +225,32 @@ void Automata::loop()
 {
     unsigned long currentMillis = millis();
 
-    if (wifiMulti.run() == WL_CONNECTED)
+    if (!mqttClient.connected() && isDeviceRegistered)
     {
-        if (!mqttClient.connected() && isDeviceRegistered)
-        {
-            mqttConnect();
-        }
-        else
-        {
-            mqttClient.loop();
-        }
+        mqttConnect();
+    }
+    else
+    {
+        mqttClient.loop();
+    }
 
-        ArduinoOTA.handle();
+    ArduinoOTA.handle();
 
-        if (currentMillis - previousMillis >= getDelay())
-        {
-            _handleDelay();
-            previousMillis = millis();
-        }
-        // Handle device registration retry
-        if (!isDeviceRegistered && (currentMillis - regTime) >= regWait)
-        {
-            registerDevice();
-            regTime = currentMillis;
-        }
+    if (currentMillis - previousMillis >= getDelay())
+    {
+        _handleDelay();
+        previousMillis = millis();
+    }
+    // Handle device registration retry
+    if (!isDeviceRegistered && (currentMillis - regTime) >= regWait)
+    {
+        registerDevice();
+        regTime = currentMillis;
     }
 }
 
 void Automata::setOTA()
 {
-    Serial.println("[Automata] setOTA()");
     ArduinoOTA.setHostname(convertToLowerAndUnderscore(deviceName).c_str());
     ArduinoOTA.setPassword("");
     ArduinoOTA.onStart([]()
@@ -306,7 +291,6 @@ void Automata::sendLive(JsonDocument data)
 
 void Automata::sendData(JsonDocument doc)
 {
-    Serial.print("[Automata] sendData(): ");
     String payload = serializeJsonDoc(doc);
     Serial.println(mqttClient.publish(makeTopic("sendData").c_str(), payload.c_str()));
 }
@@ -328,7 +312,6 @@ String Automata::serializeJsonDoc(JsonDocument &doc)
 
 void Automata::addAttribute(String key, String displayName, String unit, String type, JsonDocument extras)
 {
-    Serial.printf("[Automata] addAttribute(%s)\n", key.c_str());
     Attribute atb{key, displayName, unit, type, extras};
     attributeList.push_back(atb);
 }
@@ -409,7 +392,6 @@ void Automata::registerDevice()
 }
 void Automata::mqttConnect()
 {
-    Serial.println("[Automata] mqttConnect()");
     mqttClient.setServer(HOST, 1883);
     mqttClient.setCallback([](char *topic, byte *payload, unsigned int length)
                            { Automata::instance->mqttCallback(topic, payload, length); });
@@ -420,10 +402,7 @@ void Automata::mqttConnect()
     {
         String clientId = "automata-" + convertToLowerAndUnderscore(deviceName) + "-" + macAddr;
         Serial.printf("[Automata] Connecting as clientId: %s\n", clientId.c_str());
-        JsonDocument doc;
-        doc["status"] = "offline";
-        String payload = serializeJsonDoc(doc);
-        if (mqttClient.connect(clientId.c_str(), mqttUser, mqttPassword, "automata/status", 0, true, payload.c_str()))
+        if (mqttClient.connect(clientId.c_str(), mqttUser, mqttPassword))
         {
             Serial.println("[Automata] MQTT Connected");
             subscribeToDeviceTopics();
@@ -486,11 +465,10 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
 
 void Automata::subscribeToDeviceTopics()
 {
-    Serial.println("[Automata] subscribeToDeviceTopics()");
     String updateTopic = makeTopic("update/" + deviceId);
     String actionTopic = makeTopic("action/" + deviceId);
-    mqttClient.subscribe(updateTopic.c_str());
-    mqttClient.subscribe(actionTopic.c_str());
+    mqttClient.subscribe(updateTopic.c_str(), 1);
+    mqttClient.subscribe(actionTopic.c_str(), 1);
     Serial.printf("[Automata] Subscribed to: %s, %s\n", updateTopic.c_str(), actionTopic.c_str());
     JsonDocument doc;
     doc["status"] = "offline";
