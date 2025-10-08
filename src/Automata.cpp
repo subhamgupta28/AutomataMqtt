@@ -6,6 +6,21 @@ Automata::Automata(String deviceName, const char *HOST, int PORT)
     : deviceName(deviceName),
       HOST(HOST),
       PORT(PORT),
+      MQTT_HOST(HOST),
+      MQTT_PORT(1883),
+      server(80),
+      events("/events"),
+      mqttClient(espClient)
+{
+    instance = this;
+}
+
+Automata::Automata(String deviceName, const char *HOST, int PORT, const char *MQTT_HOST, int MQTT_PORT)
+    : deviceName(deviceName),
+      HOST(HOST),
+      PORT(PORT),
+      MQTT_HOST(MQTT_HOST),
+      MQTT_PORT(MQTT_PORT),
       server(80),
       events("/events"),
       mqttClient(espClient)
@@ -202,7 +217,8 @@ void Automata::keepWiFiAlive()
                 Serial.println("[Automata] WiFi connected");
                 configTime(5.5 * 3600, 0, ntpServer);
                 registerDevice();
-
+                Serial.printf("IP address: ");
+                Serial.println(WiFi.localIP());
                 handleWebServer();
                 setOTA();
             }
@@ -332,7 +348,7 @@ void Automata::registerDevice()
 
     Serial.printf("Registering Device (attempt %d)...\n", retryCount + 1);
 
-    StaticJsonDocument<1024> doc;
+    JsonDocument doc;
     doc["name"] = deviceName;
     doc["deviceId"] = deviceId;
     doc["type"] = "sensor";
@@ -364,7 +380,7 @@ void Automata::registerDevice()
 
     if (sendHttp(jsonString, "register", res))
     {
-        DynamicJsonDocument resp(1024);
+        JsonDocument resp;
         if (deserializeJson(resp, res) == DeserializationError::Ok)
         {
             deviceId = resp["id"].as<String>();
@@ -392,7 +408,7 @@ void Automata::registerDevice()
 }
 void Automata::mqttConnect()
 {
-    mqttClient.setServer(HOST, 1883);
+    mqttClient.setServer(MQTT_HOST, MQTT_PORT);
     mqttClient.setCallback([](char *topic, byte *payload, unsigned int length)
                            { Automata::instance->mqttCallback(topic, payload, length); });
 
@@ -445,7 +461,7 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
         _handleAction(action);
 
         bool rebootFlag = action.data["reboot"] | false;
-        DynamicJsonDocument doc(256);
+        JsonDocument doc;
         doc["key"] = "actionAck";
         doc["actionAck"] = "Success";
         String ackStr;

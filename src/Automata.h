@@ -13,7 +13,6 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoOTA.h>
 #include <vector>
-#define MQTT_MAX_PACKET_SIZE 2048
 
 struct Action
 {
@@ -83,7 +82,7 @@ public:
     using HandleDelay = std::function<void(void)>;
 
     Automata(String deviceName, const char *HOST, int PORT);
-
+    Automata(String deviceName, const char *HOST, int PORT, const char *MQTT_HOST, int MQTT_PORT);
     void begin();
 
     Preferences getPreferences();
@@ -94,7 +93,7 @@ public:
     void sendAction(JsonDocument doc);
     void onActionReceived(HandleAction cb);
     void delayedUpdate(HandleDelay hd);
-    
+
     int getDelay();
 
     static Automata *instance;
@@ -107,6 +106,8 @@ private:
     String deviceName;
     const char *HOST;
     int PORT;
+    const char *MQTT_HOST;
+    int MQTT_PORT;
     String deviceId;
     String macAddr;
     bool isDeviceRegistered = false;
