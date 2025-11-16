@@ -57,8 +57,17 @@ void Automata::configureWiFi()
     String jsonString;
     serializeJson(req, jsonString);
     String res;
+    bool ret;
+    if (USE_HTTPS)
+    {
+        ret = sendHttps(jsonString, "wifiList", res);
+    }
+    else
+    {
+        ret = sendHttps(jsonString, "wifiList", res);
+    }
 
-    if (sendHttp(jsonString, "wifiList", res))
+    if (ret)
     {
         Serial.println("[Automata] WiFi list fetched from server and stored");
         preferences.putString("wifiList", res);
@@ -112,7 +121,7 @@ void Automata::begin()
 
     xTaskCreate([](void *params)
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
-                "keepWiFiAlive", 4096, this, 3, NULL);
+                "keepWiFiAlive", 5096, this, 3, NULL);
 }
 
 void Automata::getConfig()
@@ -163,6 +172,44 @@ Preferences Automata::getPreferences()
     return preferences;
 }
 
+bool Automata::sendHttps(const String &output, const String &endpoint, String &result)
+{
+    static WiFiClientSecure client;
+    static HTTPClient http;
+    result = "";
+
+    String url = "https://" + String(HOST) + "/api/v1/main/" + endpoint;
+    Serial.printf("[HTTP] Sending to: %s\n", url.c_str());
+    Serial.printf("[MEM] Free heap before: %u\n", ESP.getFreeHeap());
+
+    client.setInsecure();
+    // client.setBufferSizes(512, 512);
+
+    if (!http.begin(client, url))
+    {
+        Serial.println("[HTTP] http.begin() failed");
+        return false;
+    }
+
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(10000);
+
+    int httpCode = http.POST(output);
+    if (httpCode > 0)
+    {
+        result = http.getString();
+        Serial.printf("[HTTP] Code: %d, Result length: %u\n", httpCode, result.length());
+    }
+    else
+    {
+        Serial.printf("[HTTP] POST failed: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    http.end();
+    Serial.printf("[MEM] Free heap after: %u\n", ESP.getFreeHeap());
+    return (httpCode >= 200 && httpCode < 300);
+}
+
 bool Automata::sendHttp(const String &output, const String &endpoint, String &result)
 {
 
@@ -170,6 +217,7 @@ bool Automata::sendHttp(const String &output, const String &endpoint, String &re
     result = "";
 
     http.begin("http://" + String(HOST) + ":" + String(PORT) + "/api/v1/main/" + endpoint);
+    // http.begin("http://" + String(HOST) + "/api/v1/main/" + endpoint);
     http.addHeader("Content-Type", "application/json");
     http.setTimeout(5000); // 5 seconds per request
 
@@ -219,6 +267,16 @@ void Automata::keepWiFiAlive()
                 registerDevice();
                 Serial.printf("IP address: ");
                 Serial.println(WiFi.localIP());
+                if (!MDNS.begin(convertToLowerAndUnderscore(deviceName).c_str()))
+                {
+                    Serial.println("Error starting mDNS");
+                    return;
+                }
+
+                // Advertise a custom service
+                MDNS.addService("esp32", "tcp", 8080); // <--- your service
+                MDNS.addServiceTxt("esp32", "tcp", "deviceId", deviceId);
+                MDNS.addServiceTxt("esp32", "tcp", "ip", WiFi.localIP().toString());
                 handleWebServer();
                 setOTA();
             }
@@ -239,8 +297,8 @@ long regTime = millis();
 long regWait = 30000;
 void Automata::loop()
 {
-    unsigned long currentMillis = millis();
 
+    unsigned long currentMillis = millis();
     if (!mqttClient.connected() && isDeviceRegistered)
     {
         mqttConnect();
@@ -377,8 +435,17 @@ void Automata::registerDevice()
     String jsonString;
     serializeJson(doc, jsonString);
     String res;
+    bool ret;
+    if (USE_HTTPS)
+    {
+        ret = sendHttps(jsonString, "register", res);
+    }
+    else
+    {
+        ret = sendHttp(jsonString, "register", res);
+    }
 
-    if (sendHttp(jsonString, "register", res))
+    if (ret)
     {
         JsonDocument resp;
         if (deserializeJson(resp, res) == DeserializationError::Ok)
@@ -406,6 +473,7 @@ void Automata::registerDevice()
 
     lastAttempt = now;
 }
+
 void Automata::mqttConnect()
 {
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);

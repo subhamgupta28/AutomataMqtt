@@ -13,6 +13,9 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoOTA.h>
 #include <vector>
+#include <ESPmDNS.h>
+
+#define USE_HTTPS 1
 
 struct Action
 {
@@ -137,7 +140,7 @@ private:
     bool sendHttp(const String &output, const String &endpoint, String &result);
     void getConfig();
     String getIdByName(const String &input, const String &searchName);
-
+    bool sendHttps(const String &output, const String &endpoint, String &result);
     // MQTT
     void mqttConnect();
     void mqttCallback(char *topic, byte *payload, unsigned int length);
