@@ -2,8 +2,9 @@
 
 Automata *Automata::instance = nullptr;
 
-Automata::Automata(String deviceName, const char *HOST, int PORT)
+Automata::Automata(String deviceName, String category, const char *HOST, int PORT)
     : deviceName(deviceName),
+      category(category),
       HOST(HOST),
       PORT(PORT),
       MQTT_HOST(HOST),
@@ -15,8 +16,9 @@ Automata::Automata(String deviceName, const char *HOST, int PORT)
     instance = this;
 }
 
-Automata::Automata(String deviceName, const char *HOST, int PORT, const char *MQTT_HOST, int MQTT_PORT)
+Automata::Automata(String deviceName, String category, const char *HOST, int PORT, const char *MQTT_HOST, int MQTT_PORT)
     : deviceName(deviceName),
+      category(category),
       HOST(HOST),
       PORT(PORT),
       MQTT_HOST(MQTT_HOST),
@@ -64,7 +66,7 @@ void Automata::configureWiFi()
     }
     else
     {
-        ret = sendHttps(jsonString, "wifiList", res);
+        ret = sendHttp(jsonString, "wifiList", res);
     }
 
     if (ret)
@@ -114,14 +116,14 @@ void Automata::begin()
     preferences.begin("my-app", false);
     wifiMulti.addAP("LAN-D", "Jio@12345");
     wifiMulti.addAP("Net2.4", "12345678");
-    wifiMulti.addAP("JioFiber-x5hnq", "12341234");
+    // wifiMulti.addAP("akhil_b204", "204204204");
     wifiMulti.addAP("wifi_NET", "444555666");
     macAddr = getMacAddress();
     getConfig();
 
     xTaskCreate([](void *params)
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
-                "keepWiFiAlive", 5096, this, 3, NULL);
+                "keepWiFiAlive", 6096, this, 3, NULL);
 }
 
 void Automata::getConfig()
@@ -263,8 +265,12 @@ void Automata::keepWiFiAlive()
             if (wifiMulti.run() == WL_CONNECTED)
             {
                 Serial.println("[Automata] WiFi connected");
-                configTime(5.5 * 3600, 0, ntpServer);
-                registerDevice();
+                if (USE_REGISTER_DEVICE)
+                {
+                    configTime((int)(5.5 * 3600), 0, ntpServer);
+                    registerDevice();
+                }
+
                 Serial.printf("IP address: ");
                 Serial.println(WiFi.localIP());
                 if (!MDNS.begin(convertToLowerAndUnderscore(deviceName).c_str()))
@@ -277,7 +283,11 @@ void Automata::keepWiFiAlive()
                 MDNS.addService("esp32", "tcp", 8080); // <--- your service
                 MDNS.addServiceTxt("esp32", "tcp", "deviceId", deviceId);
                 MDNS.addServiceTxt("esp32", "tcp", "ip", WiFi.localIP().toString());
-                handleWebServer();
+                if (USE_WEBSERVER)
+                {
+                    handleWebServer();
+                }
+
                 setOTA();
             }
             else
@@ -299,7 +309,7 @@ void Automata::loop()
 {
 
     unsigned long currentMillis = millis();
-    if (!mqttClient.connected() && isDeviceRegistered)
+    if (!mqttClient.connected() && isDeviceRegistered && USE_REGISTER_DEVICE)
     {
         mqttConnect();
     }
@@ -316,7 +326,7 @@ void Automata::loop()
         previousMillis = millis();
     }
     // Handle device registration retry
-    if (!isDeviceRegistered && (currentMillis - regTime) >= regWait)
+    if (!isDeviceRegistered && (currentMillis - regTime) >= regWait && USE_REGISTER_DEVICE)
     {
         registerDevice();
         regTime = currentMillis;
@@ -410,6 +420,7 @@ void Automata::registerDevice()
     doc["name"] = deviceName;
     doc["deviceId"] = deviceId;
     doc["type"] = "sensor";
+    doc["category"] = category;
     doc["updateInterval"] = d;
     doc["status"] = "ONLINE";
     doc["host"] = String(WiFi.getHostname());
@@ -457,6 +468,7 @@ void Automata::registerDevice()
             Serial.println("Device Registered");
 
             vTaskDelay(200);
+
             mqttConnect();
         }
     }
@@ -474,8 +486,39 @@ void Automata::registerDevice()
     lastAttempt = now;
 }
 
+void Automata::useServerCreds()
+{
+    JsonDocument doc;
+    doc["mqtt"] = true;
+    doc["deviceId"] = deviceId;
+    String jsonString;
+    serializeJson(doc, jsonString);
+    String res;
+
+    bool ret;
+    if (USE_HTTPS)
+    {
+        ret = sendHttps(jsonString, "serverCreds", res);
+    }
+    else
+    {
+        ret = sendHttp(jsonString, "serverCreds", res);
+    }
+    JsonDocument resp;
+    Serial.print(res);
+    if (deserializeJson(resp, res) == DeserializationError::Ok)
+    {
+        MQTT_HOST = resp["MQTT_HOST"].as<String>().c_str();
+        MQTT_PORT = resp["MQTT_PORT"].as<int>();
+    }
+}
+
 void Automata::mqttConnect()
 {
+    if (USE_SERVER_CREDS)
+    {
+        useServerCreds();
+    }
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);
     mqttClient.setCallback([](char *topic, byte *payload, unsigned int length)
                            { Automata::instance->mqttCallback(topic, payload, length); });
