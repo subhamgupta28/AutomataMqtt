@@ -11,7 +11,8 @@ Automata::Automata(String deviceName, String category, const char *HOST, int POR
       MQTT_PORT(1883),
       server(80),
       events("/events"),
-      mqttClient(espClient)
+      mqttClient(espClient),
+      stomper(webSocket, HOST, PORT, "/ws/", true)
 {
     instance = this;
 }
@@ -25,9 +26,126 @@ Automata::Automata(String deviceName, String category, const char *HOST, int POR
       MQTT_PORT(MQTT_PORT),
       server(80),
       events("/events"),
-      mqttClient(espClient)
+      mqttClient(espClient),
+      stomper(webSocket, HOST, PORT, "/ws/", true)
 {
     instance = this;
+}
+
+void Automata::useHTTPS()
+{
+    USE_HTTPS = true;
+}
+
+void Automata::useCreds()
+{
+    USE_SERVER_CREDS = true;
+}
+
+void Automata::useMQTT()
+{
+    transport = TRANSPORT_MQTT;
+}
+
+void Automata::useWSS()
+{
+    transport = TRANSPORT_WSS;
+}
+
+void Automata::publish(const String &topic,
+                       const String &payload,
+                       bool retained)
+{
+
+    if (transport == TRANSPORT_MQTT)
+    {
+        // Serial.println("topic " + topic);
+        // Serial.println("payload " + payload);
+        mqttClient.publish(topic.c_str(), payload.c_str(), retained);
+    }
+    else
+    {
+        // Serial.print("topic ");
+        // Serial.println(topic);
+        // Serial.println(payload);
+        stomper.sendMessage("/" + topic, payload);
+    }
+}
+Stomp::Stomp_Ack_t freeHandleUpdate(Stomp::StompCommand cmd)
+{
+    return Automata::instance->handleUpdate(cmd);
+}
+
+Stomp::Stomp_Ack_t freeHandleAction(Stomp::StompCommand cmd)
+{
+    return Automata::instance->handleAction(cmd);
+}
+void freeSubscribe(Stomp::StompCommand cmd)
+{
+    Automata::instance->wsSubscribeTopics(cmd);
+}
+void freeError(Stomp::StompCommand cmd)
+{
+    Automata::instance->error(cmd);
+}
+void Automata::error(const Stomp::StompCommand cmd)
+{
+    Serial.println("ERROR: " + cmd.body);
+    // ESP.restart();
+}
+void Automata::wsConnect()
+{
+    Serial.println("[Automata] Connecting via WSS");
+    stomper.onConnect(freeSubscribe);
+    stomper.onError(freeError);
+    if (USE_HTTPS)
+    {
+        stomper.beginSSL();
+    }
+    else
+    {
+        stomper.begin();
+    }
+}
+void Automata::wsSubscribeTopics(const Stomp::StompCommand cmd)
+{
+    Serial.println("Connected to STOMP broker");
+    String queueStr = "/topic/update/" + deviceId;
+    char queue[queueStr.length() + 1];
+    strcpy(queue, queueStr.c_str());
+    stomper.subscribe(queue, Stomp::CLIENT, freeHandleUpdate);
+    String actionStr = "/topic/action/" + deviceId;
+    char action[actionStr.length() + 1];
+    strcpy(action, actionStr.c_str());
+
+    stomper.subscribe(action, Stomp::CLIENT, freeHandleAction);
+}
+Stomp::Stomp_Ack_t Automata::handleUpdate(const Stomp::StompCommand cmd)
+{
+    String res = String(cmd.body);
+    JsonDocument resp = parseString(res);
+    String output;
+    serializeJson(resp, output);
+    Serial.println(output);
+
+    deviceId = resp["id"].as<String>();
+    preferences.putString("deviceId", deviceId);
+    preferences.putString("config", output);
+    getConfig();
+
+    return Stomp::CONTINUE;
+}
+Stomp::Stomp_Ack_t Automata::handleAction(const Stomp::StompCommand cmd)
+{
+
+    String res = String(cmd.body);
+    String topic = "/action/" + deviceId;
+
+    mqttCallback(
+        (char *)topic.c_str(),
+        (byte *)res.c_str(),
+        res.length());
+    return Stomp::CONTINUE;
 }
 
 String Automata::convertToLowerAndUnderscore(String input)
@@ -116,14 +234,14 @@ void Automata::begin()
     preferences.begin("my-app", false);
     wifiMulti.addAP("LAN-D", "Jio@12345");
     wifiMulti.addAP("Net2.4", "12345678");
-    // wifiMulti.addAP("akhil_b204", "204204204");
+    wifiMulti.addAP("SECOND FLOOR 1", "123456789");
     wifiMulti.addAP("wifi_NET", "444555666");
     macAddr = getMacAddress();
     getConfig();
 
     xTaskCreate([](void *params)
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
-                "keepWiFiAlive", 6096, this, 3, NULL);
+                "keepWiFiAlive", 12288, this, 3, NULL);
 }
 
 void Automata::getConfig()
@@ -309,20 +427,26 @@ void Automata::loop()
 {
 
     unsigned long currentMillis = millis();
-    if (!mqttClient.connected() && isDeviceRegistered && USE_REGISTER_DEVICE)
+
+    if (transport == TRANSPORT_MQTT)
     {
-        mqttConnect();
+        if (!mqttClient.connected() && isDeviceRegistered && USE_REGISTER_DEVICE)
+            mqttConnect();
+        else
+            mqttClient.loop();
     }
     else
     {
-        mqttClient.loop();
+        webSocket.loop();
     }
-
     ArduinoOTA.handle();
 
     if (currentMillis - previousMillis >= getDelay())
     {
-        _handleDelay();
+        if (_handleDelay)
+        {
+            _handleDelay();
+        }
         previousMillis = millis();
     }
     // Handle device registration retry
@@ -366,7 +490,7 @@ void Automata::setOTA()
 void Automata::sendLive(JsonDocument data)
 {
     String payload = serializeJsonDoc(data);
-    mqttClient.publish(makeTopic("sendLiveData").c_str(), payload.c_str(), 0);
+    publish(makeTopic("sendLiveData"), payload, 0);
 
     String json;
     serializeJson(data, json);
@@ -376,14 +500,14 @@ void Automata::sendLive(JsonDocument data)
 void Automata::sendData(JsonDocument doc)
 {
     String payload = serializeJsonDoc(doc);
-    Serial.println(mqttClient.publish(makeTopic("sendData").c_str(), payload.c_str()));
+    publish(makeTopic("sendData"), payload);
 }
 
 void Automata::sendAction(JsonDocument doc)
 {
     Serial.print("[Automata] sendAction(): ");
     String payload = serializeJsonDoc(doc);
-    Serial.println(mqttClient.publish(makeTopic("action").c_str(), payload.c_str()));
+    publish(makeTopic("action"), payload);
 }
 
 String Automata::serializeJsonDoc(JsonDocument &doc)
@@ -391,6 +515,21 @@ String Automata::serializeJsonDoc(JsonDocument &doc)
     doc["device_id"] = deviceId;
     String output;
     serializeJson(doc, output);
+
+    if (transport == TRANSPORT_WSS)
+    {
+        String escapedString = "";
+        for (int i = 0; i < output.length(); i++)
+        {
+            if (output.charAt(i) == '"')
+            {
+                escapedString += '\\';
+            }
+            escapedString += output.charAt(i);
+        }
+        return escapedString;
+    }
+
     return output;
 }
 
@@ -468,8 +607,12 @@ void Automata::registerDevice()
             Serial.println("Device Registered");
 
             vTaskDelay(200);
-
-            mqttConnect();
+            if (transport == TRANSPORT_WSS)
+            {
+                wsConnect();
+            }
+            else
+                mqttConnect();
         }
     }
     else
@@ -569,7 +712,10 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
         Serial.println("[Automata] Action message received");
         JsonDocument resp = parseString(msg);
         Action action{resp};
-        _handleAction(action);
+        if (_handleAction)
+        {
+            _handleAction(action);
+        }
 
         bool rebootFlag = action.data["reboot"] | false;
         JsonDocument doc;
@@ -612,6 +758,7 @@ JsonDocument Automata::parseString(String str)
 {
     JsonDocument resp;
     str.trim();
+    str.replace("\\", "");
     DeserializationError err = deserializeJson(resp, str);
     if (err)
         Serial.printf("[Automata] JSON parse error: %s\n", err.c_str());

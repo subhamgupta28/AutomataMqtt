@@ -14,11 +14,13 @@
 #include <ArduinoOTA.h>
 #include <vector>
 #include <ESPmDNS.h>
+#include "StompClient.h"
+#include <WebSocketsClient.h>
 
-#define USE_HTTPS 1
+// #define USE_HTTPS 0
 #define USE_WEBSERVER 1
 #define USE_REGISTER_DEVICE 1
-#define USE_SERVER_CREDS 1
+// #define USE_SERVER_CREDS 0
 
 #ifndef USE_WEBSERVER
 #define USE_WEBSERVER 1
@@ -32,7 +34,11 @@ struct Action
 {
     JsonDocument data;
 };
-
+enum PubSubTransport
+{
+    TRANSPORT_MQTT,
+    TRANSPORT_WSS
+};
 struct Attribute
 {
     String key;
@@ -41,6 +47,11 @@ struct Attribute
     String type;
     JsonDocument extras;
 };
+
+void freeSubscribe(Stomp::StompCommand cmd);
+void freeError(Stomp::StompCommand cmd);
+Stomp::Stomp_Ack_t freeHandleUpdate(Stomp::StompCommand cmd);
+Stomp::Stomp_Ack_t freeHandleAction(Stomp::StompCommand cmd);
 
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -165,9 +176,16 @@ public:
     void sendData(JsonDocument doc);
     void sendAction(JsonDocument doc);
     void onActionReceived(HandleAction cb);
+    void error(Stomp::StompCommand);
+    void wsSubscribeTopics(Stomp::StompCommand);
     void delayedUpdate(HandleDelay hd);
-    
-
+    Stomp::Stomp_Ack_t handleUpdate(const Stomp::StompCommand cmd);
+    Stomp::Stomp_Ack_t handleAction(const Stomp::StompCommand cmd);
+    /* Transport selection */
+    void useMQTT();
+    void useWSS();
+    void useCreds();
+    void useHTTPS();
     int getDelay();
 
     static Automata *instance;
@@ -198,8 +216,8 @@ private:
     const char *mqttUser = "mqttadmin";
     const char *mqttPassword = "12345678";
 
-    HandleAction _handleAction;
-    HandleDelay _handleDelay;
+    HandleAction _handleAction = nullptr;
+    HandleDelay _handleDelay = nullptr;
     std::vector<Attribute> attributeList;
     unsigned long previousMillis = 0;
     int d = 60000; // default delay
@@ -221,6 +239,18 @@ private:
     void subscribeToDeviceTopics();
     String serializeJsonDoc(JsonDocument &doc);
     JsonDocument parseString(String str);
+
+    /* Transport */
+    PubSubTransport transport = TRANSPORT_MQTT;
+    bool USE_HTTPS = false;
+    bool USE_SERVER_CREDS = false;
+    /* WSS */
+    WebSocketsClient webSocket;
+    Stomp::StompClient stomper;
+    bool wsConnected = false;
+    void wsConnect();
+
+    void publish(const String &topic, const String &payload, bool retained = false);
 };
 
 #endif
