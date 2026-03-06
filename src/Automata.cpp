@@ -234,7 +234,7 @@ void Automata::begin()
     preferences.begin("my-app", false);
     wifiMulti.addAP("LAN-D", "Jio@12345");
     wifiMulti.addAP("Net2.4", "12345678");
-    wifiMulti.addAP("SECOND FLOOR 1", "123456789");
+    wifiMulti.addAP("Ganda6969", "mohit@12345");
     wifiMulti.addAP("wifi_NET", "444555666");
     macAddr = getMacAddress();
     getConfig();
