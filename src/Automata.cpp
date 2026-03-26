@@ -12,7 +12,7 @@ Automata::Automata(String deviceName, String category, const char *HOST, int POR
       server(80),
       events("/events"),
       mqttClient(espClient),
-      stomper(webSocket, HOST, PORT, "/ws/", true)
+      stomper(webSocket, MQTT_HOST, MQTT_PORT, "/ws/", true)
 {
     instance = this;
 }
@@ -27,7 +27,7 @@ Automata::Automata(String deviceName, String category, const char *HOST, int POR
       server(80),
       events("/events"),
       mqttClient(espClient),
-      stomper(webSocket, HOST, PORT, "/ws/", true)
+      stomper(webSocket, MQTT_HOST, MQTT_PORT, "/ws/", true)
 {
     instance = this;
 }
