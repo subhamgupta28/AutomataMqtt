@@ -113,6 +113,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 <body>
     <h2>Automata</h2>
     <div id="data">Loading...</div>
+    <div id="actions"></div>
 
     <script>
         if (!!window.EventSource) {
@@ -152,6 +153,71 @@ const char index_html[] PROGMEM = R"rawliteral(
                 }
             });
         }
+        function sendAction(key, value) {
+            let payload = {};
+            payload[key] = value;
+
+            fetch('/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        }
+        async function loadUI() {
+            const res = await fetch('/config');
+            const data = await res.json();
+
+            let actionHTML = "";
+            let dataHTML = `<div id='grid'>`;
+
+            data.attributes.forEach(attr => {
+
+                const types = attr.type.split("|");
+
+                // ✅ ACTION UI
+                if (types.includes("ACTION")) {
+
+                    if (types.includes("SWITCH")) {
+                        actionHTML += `
+                            <label style="display:block;margin:10px;">
+                                ${attr.label}
+                                <input type="checkbox"
+                                    onchange="sendAction('${attr.key}', this.checked)">
+                            </label>`;
+                    }
+
+                    else if (types.includes("BTN")) {
+                        actionHTML += `
+                            <button onclick="sendAction('${attr.key}', true)">
+                                ${attr.label}
+                            </button>`;
+                    }
+
+                    else if (types.includes("SLIDER")) {
+                        actionHTML += `
+                            <label>${attr.label}</label>
+                            <input type="range" min="0" max="100"
+                                onchange="sendAction('${attr.key}', this.value)">`;
+                    }
+                }
+
+                // ✅ DATA UI
+                else if (types.includes("DATA")) {
+                    dataHTML += `
+                        <div class='item'>
+                            <div class='key'>${attr.label}</div>
+                            <div class='value' id="val_${attr.key}">--</div>
+                        </div>`;
+                }
+
+            });
+
+            dataHTML += `</div>`;
+
+            document.getElementById("data").innerHTML = dataHTML;
+            document.getElementById("actions").innerHTML = actionHTML;
+        }
+        loadUI();
     </script>
 </body>
 

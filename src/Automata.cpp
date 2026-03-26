@@ -281,7 +281,45 @@ void Automata::handleWebServer()
                          {
                              Serial.println("[Automata] New SSE client connected");
                          } });
+    server.on("/action", HTTP_POST, [](AsyncWebServerRequest *request) {}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total)
+              {
 
+    String body = "";
+    for (size_t i = 0; i < len; i++) {
+        body += (char)data[i];
+    }
+
+    Serial.println("Received Action: " + body);
+
+    DynamicJsonDocument doc(512);
+    deserializeJson(doc, body);
+
+    Action action;
+    action.data = doc;
+
+    if (Automata::instance->_handleAction) {
+        Automata::instance->_handleAction(action);
+    }
+
+    request->send(200, "text/plain", "OK"); });
+    server.on("/config", HTTP_GET, [](AsyncWebServerRequest *request)
+              {
+    JsonDocument doc;
+
+    JsonArray arr = doc.createNestedArray("attributes");
+
+    for (auto &a : Automata::instance->attributeList)
+    {
+        JsonObject obj = arr.createNestedObject();
+        obj["key"] = a.key;
+        obj["label"] = a.displayName;
+        obj["unit"] = a.unit;
+        obj["type"] = a.type;
+    }
+
+    String res;
+    serializeJson(doc, res);
+    request->send(200, "application/json", res); });
     server.addHandler(&events);
     server.begin();
     Serial.println("[Automata] Web server started");
