@@ -279,8 +279,8 @@ private:
     WiFiClient espClient;
     PubSubClient mqttClient;
     String mqttBaseTopic = "automata";
-    const char *mqttUser = "mqttadmin";
-    const char *mqttPassword = "12345678";
+    const char *mqttUser = "admin";
+    const char *mqttPassword = "admin";
 
     HandleAction _handleAction = nullptr;
     HandleDelay _handleDelay = nullptr;

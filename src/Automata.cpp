@@ -241,7 +241,7 @@ void Automata::begin()
 
     xTaskCreate([](void *params)
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
-                "keepWiFiAlive", 12288, this, 3, NULL);
+                "keepWiFiAlive", 16384, this, 3, NULL);
 }
 
 void Automata::getConfig()
@@ -470,12 +470,12 @@ void Automata::loop()
     {
         if (!mqttClient.connected() && isDeviceRegistered && USE_REGISTER_DEVICE)
             mqttConnect();
-        else
+        else if (mqttClient.connected()) // ← only loop if actually connected
             mqttClient.loop();
     }
     else
     {
-        webSocket.loop();
+            webSocket.loop();
     }
     ArduinoOTA.handle();
 
@@ -789,7 +789,7 @@ void Automata::subscribeToDeviceTopics()
 
 String Automata::makeTopic(const String &subtopic)
 {
-    return mqttBaseTopic + "/" + subtopic;
+        return mqttBaseTopic + "/" + subtopic;
 }
 
 JsonDocument Automata::parseString(String str)
