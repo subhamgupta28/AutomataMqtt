@@ -529,7 +529,7 @@ void Automata::loop()
             wsSubscribed = false;
         }
     }
-  
+
     ArduinoOTA.handle();
 
     if (currentMillis - previousMillis >= getDelay())
@@ -842,6 +842,11 @@ void Automata::subscribeToDeviceTopics()
 
 String Automata::makeTopic(const String &subtopic)
 {
+    if (transport == TRANSPORT_MQTT)
+    {
+        return subtopic;
+    }
+
     return mqttBaseTopic + "/" + subtopic;
 }
 
