@@ -58,7 +58,7 @@ void Automata::publish(const String &topic,
 {
     if (transport == TRANSPORT_MQTT)
     {
-        mqttClient.publish("/" +topic.c_str(), payload.c_str(), retained);
+        mqttClient.publish(topic.c_str(), payload.c_str(), retained);
     }
     else
     {
