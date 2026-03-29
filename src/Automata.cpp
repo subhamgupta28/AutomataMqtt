@@ -829,8 +829,8 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
 
 void Automata::subscribeToDeviceTopics()
 {
-    String updateTopic = makeTopic("update/" + deviceId);
-    String actionTopic = makeTopic("action/" + deviceId);
+    String updateTopic = makeTopic("/topic/update/" + deviceId);
+    String actionTopic = makeTopic("/topic/action/" + deviceId);
     mqttClient.subscribe(updateTopic.c_str(), 1);
     mqttClient.subscribe(actionTopic.c_str(), 1);
     Serial.printf("[Automata] Subscribed to: %s, %s\n", updateTopic.c_str(), actionTopic.c_str());
