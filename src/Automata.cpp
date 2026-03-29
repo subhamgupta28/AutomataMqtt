@@ -11,10 +11,10 @@ Automata::Automata(String deviceName, String category, const char *HOST, int POR
       MQTT_PORT(1883),
       server(80),
       events("/events"),
-      mqttClient(espClient),
-      stomper(webSocket, MQTT_HOST, MQTT_PORT, "/ws/", true)
+      mqttClient(espClient)
 {
     instance = this;
+    simpleStomp = new SimpleStomp(MQTT_HOST, MQTT_PORT, "/ws/", mqttUser, mqttPassword);
 }
 
 Automata::Automata(String deviceName, String category, const char *HOST, int PORT, const char *MQTT_HOST, int MQTT_PORT)
@@ -26,10 +26,10 @@ Automata::Automata(String deviceName, String category, const char *HOST, int POR
       MQTT_PORT(MQTT_PORT),
       server(80),
       events("/events"),
-      mqttClient(espClient),
-      stomper(webSocket, MQTT_HOST, MQTT_PORT, "/ws/", true)
+      mqttClient(espClient)
 {
     instance = this;
+    simpleStomp = new SimpleStomp(MQTT_HOST, MQTT_PORT, "/ws/", mqttUser, mqttPassword);
 }
 
 void Automata::useHTTPS()
@@ -56,96 +56,134 @@ void Automata::publish(const String &topic,
                        const String &payload,
                        bool retained)
 {
-
     if (transport == TRANSPORT_MQTT)
     {
-        // Serial.println("topic " + topic);
-        // Serial.println("payload " + payload);
         mqttClient.publish(topic.c_str(), payload.c_str(), retained);
     }
     else
     {
-        // Serial.print("topic ");
-        // Serial.println(topic);
-        // Serial.println(payload);
-        stomper.sendMessage("/" + topic, payload);
+        // ✅ FIX: MUST use /topic/
+        simpleStomp->send("/" + topic, payload);
     }
 }
-Stomp::Stomp_Ack_t freeHandleUpdate(Stomp::StompCommand cmd)
+void Automata::handleError(String error)
 {
-    return Automata::instance->handleUpdate(cmd);
-}
-
-Stomp::Stomp_Ack_t freeHandleAction(Stomp::StompCommand cmd)
-{
-    return Automata::instance->handleAction(cmd);
-}
-void freeSubscribe(Stomp::StompCommand cmd)
-{
-    Automata::instance->wsSubscribeTopics(cmd);
-}
-void freeError(Stomp::StompCommand cmd)
-{
-    Automata::instance->error(cmd);
-}
-void Automata::error(const Stomp::StompCommand cmd)
-{
-    Serial.println("ERROR: " + cmd.body);
+    Serial.println("[Automata] ERROR: " + error);
     // ESP.restart();
 }
 void Automata::wsConnect()
 {
     Serial.println("[Automata] Connecting via WSS");
-    stomper.onConnect(freeSubscribe);
-    stomper.onError(freeError);
-    if (USE_HTTPS)
-    {
-        stomper.beginSSL();
-    }
-    else
-    {
-        stomper.begin();
-    }
-}
-void Automata::wsSubscribeTopics(const Stomp::StompCommand cmd)
-{
-    Serial.println("Connected to STOMP broker");
-    String queueStr = "/topic/update/" + deviceId;
-    char queue[queueStr.length() + 1];
-    strcpy(queue, queueStr.c_str());
-    stomper.subscribe(queue, Stomp::CLIENT, freeHandleUpdate);
-    String actionStr = "/topic/action/" + deviceId;
-    char action[actionStr.length() + 1];
-    strcpy(action, actionStr.c_str());
 
-    stomper.subscribe(action, Stomp::CLIENT, freeHandleAction);
+    simpleStomp->onMessage([this](String destination, String body)
+                           {
+
+        Serial.println("[Automata] Received on: " + destination);
+
+        if (destination.indexOf("update") != -1)
+        {
+            handleUpdate(body);
+        }
+        else if (destination.indexOf("action") != -1)
+        {
+            handleAction(body);
+        } });
+
+    simpleStomp->begin();
 }
-Stomp::Stomp_Ack_t Automata::handleUpdate(const Stomp::StompCommand cmd)
+
+void Automata::handleWSSMessage(String msg)
 {
-    String res = String(cmd.body);
+    // Check message type based on STOMP frame
+    if (msg.startsWith("CONNECTED"))
+    {
+        Serial.println("[Automata] STOMP Connected to broker");
+        wsSubscribeTopics();
+    }
+    else if (msg.startsWith("MESSAGE"))
+    {
+        // Extract body from MESSAGE frame (body starts after double newline)
+        int bodyStart = msg.indexOf("\n\n");
+        if (bodyStart == -1)
+        {
+            Serial.println("[Automata] Invalid MESSAGE frame - no body separator");
+            return;
+        }
+
+        String body = msg.substring(bodyStart + 2);
+        // Remove null terminator if present
+        body.replace("\0", "");
+
+        // Parse which subscription this is from by checking destination header
+        int destStart = msg.indexOf("destination:");
+        if (destStart != -1)
+        {
+            int destEnd = msg.indexOf("\n", destStart);
+            String destination = msg.substring(destStart + 12, destEnd);
+            destination.trim();
+
+            Serial.printf("[Automata] MESSAGE from: %s\n", destination.c_str());
+
+            if (destination.indexOf("update") != -1)
+            {
+                Serial.println("[Automata] Processing UPDATE message");
+                handleUpdate(body);
+            }
+            else if (destination.indexOf("action") != -1)
+            {
+                Serial.println("[Automata] Processing ACTION message");
+                handleAction(body);
+            }
+        }
+    }
+    else if (msg.startsWith("RECEIPT"))
+    {
+        Serial.println("[Automata] Received STOMP RECEIPT");
+    }
+    else if (msg.startsWith("ERROR"))
+    {
+        int bodyStart = msg.indexOf("\n\n");
+        String errorBody = (bodyStart != -1) ? msg.substring(bodyStart + 2) : msg;
+        Serial.println("[Automata] STOMP ERROR: " + errorBody);
+        handleError(errorBody);
+    }
+}
+void Automata::wsSubscribeTopics()
+{
+    String updateTopic = "/exchange/amq.topic/action.update." + deviceId;
+    String actionTopic = "/exchange/amq.topic/action." + deviceId;
+
+    simpleStomp->subscribe(updateTopic);
+    simpleStomp->subscribe(actionTopic);
+
+    Serial.println("[Automata] Subscribed to:");
+    Serial.println(updateTopic);
+    Serial.println(actionTopic);
+}
+void Automata::handleUpdate(const String &msg)
+{
+    String res = msg;
     JsonDocument resp = parseString(res);
     String output;
     serializeJson(resp, output);
+    Serial.println("[Automata] Update received:");
     Serial.println(output);
 
     deviceId = resp["id"].as<String>();
     preferences.putString("deviceId", deviceId);
     preferences.putString("config", output);
     getConfig();
-
-    return Stomp::CONTINUE;
 }
-Stomp::Stomp_Ack_t Automata::handleAction(const Stomp::StompCommand cmd)
-{
 
-    String res = String(cmd.body);
+void Automata::handleAction(const String &msg)
+{
+    String res = msg;
     String topic = "/action/" + deviceId;
 
     mqttCallback(
         (char *)topic.c_str(),
         (byte *)res.c_str(),
         res.length());
-    return Stomp::CONTINUE;
 }
 
 String Automata::convertToLowerAndUnderscore(String input)
@@ -473,10 +511,25 @@ void Automata::loop()
         else if (mqttClient.connected()) // ← only loop if actually connected
             mqttClient.loop();
     }
-    else
+    static bool wsSubscribed = false;
+
+    if (transport == TRANSPORT_WSS && simpleStomp)
     {
-            webSocket.loop();
+        simpleStomp->loop();
+
+        if (simpleStomp->isConnected() && !wsSubscribed)
+        {
+            Serial.println("[Automata] Re-subscribing topics...");
+            wsSubscribeTopics();
+            wsSubscribed = true;
+        }
+
+        if (!simpleStomp->isConnected())
+        {
+            wsSubscribed = false;
+        }
     }
+  
     ArduinoOTA.handle();
 
     if (currentMillis - previousMillis >= getDelay())
@@ -554,19 +607,19 @@ String Automata::serializeJsonDoc(JsonDocument &doc)
     String output;
     serializeJson(doc, output);
 
-    if (transport == TRANSPORT_WSS)
-    {
-        String escapedString = "";
-        for (int i = 0; i < output.length(); i++)
-        {
-            if (output.charAt(i) == '"')
-            {
-                escapedString += '\\';
-            }
-            escapedString += output.charAt(i);
-        }
-        return escapedString;
-    }
+    // if (transport == TRANSPORT_WSS)
+    // {
+    //     String escapedString = "";
+    //     for (int i = 0; i < output.length(); i++)
+    //     {
+    //         if (output.charAt(i) == '"')
+    //         {
+    //             escapedString += '\\';
+    //         }
+    //         escapedString += output.charAt(i);
+    //     }
+    //     return escapedString;
+    // }
 
     return output;
 }
@@ -789,7 +842,7 @@ void Automata::subscribeToDeviceTopics()
 
 String Automata::makeTopic(const String &subtopic)
 {
-        return mqttBaseTopic + "/" + subtopic;
+    return mqttBaseTopic + "/" + subtopic;
 }
 
 JsonDocument Automata::parseString(String str)

@@ -14,8 +14,7 @@
 #include <ArduinoOTA.h>
 #include <vector>
 #include <ESPmDNS.h>
-#include "StompClient.h"
-#include <WebSocketsClient.h>
+#include "SimpleStomp.h"
 
 // #define USE_HTTPS 0
 #define USE_WEBSERVER 1
@@ -47,11 +46,6 @@ struct Attribute
     String type;
     JsonDocument extras;
 };
-
-void freeSubscribe(Stomp::StompCommand cmd);
-void freeError(Stomp::StompCommand cmd);
-Stomp::Stomp_Ack_t freeHandleUpdate(Stomp::StompCommand cmd);
-Stomp::Stomp_Ack_t freeHandleAction(Stomp::StompCommand cmd);
 
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -242,11 +236,11 @@ public:
     void sendData(JsonDocument doc);
     void sendAction(JsonDocument doc);
     void onActionReceived(HandleAction cb);
-    void error(Stomp::StompCommand);
-    void wsSubscribeTopics(Stomp::StompCommand);
+    void handleError(String error);
+    void wsSubscribeTopics();
     void delayedUpdate(HandleDelay hd);
-    Stomp::Stomp_Ack_t handleUpdate(const Stomp::StompCommand cmd);
-    Stomp::Stomp_Ack_t handleAction(const Stomp::StompCommand cmd);
+    void handleUpdate(const String &msg);
+    void handleAction(const String &msg);
     /* Transport selection */
     void useMQTT();
     void useWSS();
@@ -278,7 +272,7 @@ private:
     AsyncEventSource events;
     WiFiClient espClient;
     PubSubClient mqttClient;
-    String mqttBaseTopic = "automata";
+    String mqttBaseTopic = "topic";
     const char *mqttUser = "admin";
     const char *mqttPassword = "admin";
 
@@ -311,10 +305,10 @@ private:
     bool USE_HTTPS = false;
     bool USE_SERVER_CREDS = false;
     /* WSS */
-    WebSocketsClient webSocket;
-    Stomp::StompClient stomper;
+    SimpleStomp* simpleStomp = nullptr;
     bool wsConnected = false;
     void wsConnect();
+    void handleWSSMessage(String msg);
 
     void publish(const String &topic, const String &payload, bool retained = false);
 };
