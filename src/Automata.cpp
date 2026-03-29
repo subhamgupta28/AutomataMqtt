@@ -788,7 +788,7 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
     Serial.printf("[Automata] Payload: %s\n", msg.c_str());
 
     String topicStr = String(topic);
-    if (topicStr.endsWith("/update/" + deviceId))
+    if (topicStr.endsWith("update/" + deviceId))
     {
         Serial.println("[Automata] Update message received");
         JsonDocument resp = parseString(msg);
@@ -798,7 +798,7 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
         preferences.putString("config", msg);
         getConfig();
     }
-    else if (topicStr.endsWith("/action/" + deviceId))
+    else if (topicStr.endsWith("action/" + deviceId))
     {
         Serial.println("[Automata] Action message received");
         JsonDocument resp = parseString(msg);
@@ -829,8 +829,8 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
 
 void Automata::subscribeToDeviceTopics()
 {
-    String updateTopic = makeTopic("/topic/update/" + deviceId);
-    String actionTopic = makeTopic("/topic/action/" + deviceId);
+    String updateTopic = makeTopic("update/" + deviceId);
+    String actionTopic = makeTopic("action/" + deviceId);
     mqttClient.subscribe(updateTopic.c_str(), 1);
     mqttClient.subscribe(actionTopic.c_str(), 1);
     Serial.printf("[Automata] Subscribed to: %s, %s\n", updateTopic.c_str(), actionTopic.c_str());
@@ -845,7 +845,7 @@ String Automata::makeTopic(const String &subtopic)
     if (transport == TRANSPORT_MQTT)
     {
         return subtopic;
-    }
+    }else
 
     return mqttBaseTopic + "/" + subtopic;
 }
