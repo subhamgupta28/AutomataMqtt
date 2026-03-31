@@ -14,12 +14,10 @@
 #include <ArduinoOTA.h>
 #include <vector>
 #include <ESPmDNS.h>
-#include "SimpleStomp.h"
+#include "MQTTWebSocket.h" // ← replaces SimpleStomp.h
 
-// #define USE_HTTPS 0
 #define USE_WEBSERVER 1
 #define USE_REGISTER_DEVICE 1
-// #define USE_SERVER_CREDS 0
 
 #ifndef USE_WEBSERVER
 #define USE_WEBSERVER 1
@@ -33,11 +31,13 @@ struct Action
 {
     JsonDocument data;
 };
+
 enum PubSubTransport
 {
     TRANSPORT_MQTT,
     TRANSPORT_WSS
 };
+
 struct Attribute
 {
     String key;
@@ -53,168 +53,63 @@ const char index_html[] PROGMEM = R"rawliteral(
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body {
-            background-color: #111;
-            color: #fff;
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-        }
-
-        h2 {
-            text-align: center;
-            margin-bottom: 20px;
-            font-size: 28px;
-            letter-spacing: 2px;
-        }
-
-        #grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 18px;
-            width: 90%;
-            max-width: 900px;
-            margin: auto;
-        }
-
-        .item {
-            background: #222;
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            box-shadow: 0 0 10px rgba(0,0,0,0.4);
-        }
-
-        .key {
-            font-size: 14px;
-            color: #bbbbbb;
-        }
-
-        .value {
-            font-size: 20px;
-            margin-top: 5px;
-            font-weight: bold;
-        }
-
-        footer {
-            text-align: center;
-            margin-top: 30px;
-            color: #777;
-        }
+        body { background-color: #111; color: #fff; font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        h2 { text-align: center; margin-bottom: 20px; font-size: 28px; letter-spacing: 2px; }
+        #grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 18px; width: 90%; max-width: 900px; margin: auto; }
+        .item { background: #222; padding: 15px; border-radius: 10px; text-align: center; box-shadow: 0 0 10px rgba(0,0,0,0.4); }
+        .key { font-size: 14px; color: #bbbbbb; }
+        .value { font-size: 20px; margin-top: 5px; font-weight: bold; }
+        footer { text-align: center; margin-top: 30px; color: #777; }
     </style>
 </head>
-
 <body>
     <h2>Automata</h2>
     <div id="data">Loading...</div>
     <div id="actions"></div>
-
     <script>
         if (!!window.EventSource) {
             var source = new EventSource('/events');
-
-            source.addEventListener('open', function() {
-                console.log("Events Connected");
-            });
-
-            source.addEventListener('error', function(e) {
-                if (e.target.readyState !== EventSource.OPEN) {
-                    console.log("Events Disconnected");
-                }
-            });
-
+            source.addEventListener('open', function() { console.log("Events Connected"); });
+            source.addEventListener('error', function(e) { if (e.target.readyState !== EventSource.OPEN) console.log("Events Disconnected"); });
             source.addEventListener('live', function(e) {
-                console.log("Received Data:", e.data);
-
                 try {
                     let jsonData = JSON.parse(e.data);
-                    let grid = `<div id='grid'>`;
-
+                    let grid = "<div id='grid'>";
                     Object.entries(jsonData).forEach(([key, value]) => {
-                        grid += `
-                            <div class='item'>
-                                <div class='key'>${key}</div>
-                                <div class='value'>${value}</div>
-                            </div>`;
+                        grid += "<div class='item'><div class='key'>" + key + "</div><div class='value'>" + value + "</div></div>";
                     });
-
-                    grid += `</div>`;
+                    grid += "</div>";
                     document.getElementById('data').innerHTML = grid;
-
-                } catch (err) {
-                    console.error("JSON Parse Error:", err);
-                    document.getElementById('data').innerHTML = "<p>Error loading data</p>";
-                }
+                } catch (err) { document.getElementById('data').innerHTML = "<p>Error loading data</p>"; }
             });
         }
         function sendAction(key, value) {
             let payload = {};
             payload[key] = value;
-
-            fetch('/action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            fetch('/action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         }
         async function loadUI() {
             const res = await fetch('/config');
             const data = await res.json();
-
             let actionHTML = "";
-            let dataHTML = `<div id='grid'>`;
-
+            let dataHTML = "<div id='grid'>";
             data.attributes.forEach(attr => {
-
                 const types = attr.type.split("|");
-
-                // ✅ ACTION UI
                 if (types.includes("ACTION")) {
-
-                    if (types.includes("SWITCH")) {
-                        actionHTML += `
-                            <label style="display:block;margin:10px;">
-                                ${attr.label}
-                                <input type="checkbox"
-                                    onchange="sendAction('${attr.key}', this.checked)">
-                            </label>`;
-                    }
-
-                    else if (types.includes("BTN")) {
-                        actionHTML += `
-                            <button onclick="sendAction('${attr.key}', true)">
-                                ${attr.label}
-                            </button>`;
-                    }
-
-                    else if (types.includes("SLIDER")) {
-                        actionHTML += `
-                            <label>${attr.label}</label>
-                            <input type="range" min="0" max="100"
-                                onchange="sendAction('${attr.key}', this.value)">`;
-                    }
+                    if (types.includes("SWITCH")) actionHTML += "<label style='display:block;margin:10px;'>" + attr.label + "<input type='checkbox' onchange='sendAction(\"" + attr.key + "\", this.checked)'></label>";
+                    else if (types.includes("BTN")) actionHTML += "<button onclick='sendAction(\"" + attr.key + "\", true)'>" + attr.label + "</button>";
+                    else if (types.includes("SLIDER")) actionHTML += "<label>" + attr.label + "</label><input type='range' min='0' max='100' onchange='sendAction(\"" + attr.key + "\", this.value)'>";
+                } else if (types.includes("DATA")) {
+                    dataHTML += "<div class='item'><div class='key'>" + attr.label + "</div><div class='value' id='val_" + attr.key + "'>--</div></div>";
                 }
-
-                // ✅ DATA UI
-                else if (types.includes("DATA")) {
-                    dataHTML += `
-                        <div class='item'>
-                            <div class='key'>${attr.label}</div>
-                            <div class='value' id="val_${attr.key}">--</div>
-                        </div>`;
-                }
-
             });
-
-            dataHTML += `</div>`;
-
+            dataHTML += "</div>";
             document.getElementById("data").innerHTML = dataHTML;
             document.getElementById("actions").innerHTML = actionHTML;
         }
         loadUI();
     </script>
 </body>
-
 <footer><p>Made by Subham</p></footer>
 </html>
 )rawliteral";
@@ -226,11 +121,13 @@ public:
     using HandleDelay = std::function<void(void)>;
 
     Automata(String deviceName, String category = "", const char *HOST = "", int PORT = 0);
-    Automata(String deviceName, String category = "", const char *HOST = "", int PORT = 0, const char *MQTT_HOST = "", int MQTT_PORT = 0);
-    void begin();
+    Automata(String deviceName, String category = "", const char *HOST = "", int PORT = 0,
+             const char *MQTT_HOST = "", int MQTT_PORT = 0);
 
+    void begin();
     Preferences getPreferences();
-    void addAttribute(String key, String displayName, String unit, String type = "INFO", JsonDocument extras = JsonDocument());
+    void addAttribute(String key, String displayName, String unit,
+                      String type = "INFO", JsonDocument extras = JsonDocument());
     void registerDevice();
     void sendLive(JsonDocument data);
     void sendData(JsonDocument doc);
@@ -242,7 +139,6 @@ public:
     void handleUpdate(const String &msg);
     void handleAction(const String &msg);
     bool isConnected();
-    /* Transport selection */
     void useMQTT();
     void useWSS();
     void useCreds();
@@ -257,6 +153,7 @@ private:
     String getMacAddress();
     void handleWebServer();
     void useServerCreds();
+
     String deviceName;
     String category;
     const char *HOST;
@@ -273,45 +170,47 @@ private:
     AsyncEventSource events;
     WiFiClient espClient;
     PubSubClient mqttClient;
+
     String mqttBaseTopic = "topic";
     const char *mqttUser = "admin";
     const char *mqttPassword = "admin";
 
     HandleAction _handleAction = nullptr;
     HandleDelay _handleDelay = nullptr;
+
     std::vector<Attribute> attributeList;
     unsigned long previousMillis = 0;
-    int d = 60000; // default delay
+    int d = 60000;
     const char *ntpServer = "pool.ntp.org";
 
-    // Helpers
+    // ── Helpers ──────────────────────────────
     String convertToLowerAndUnderscore(String input);
     char toLowerCase(char c);
     void keepWiFiAlive();
     void setOTA();
     bool sendHttp(const String &output, const String &endpoint, String &result);
-    void getConfig();
-    String getIdByName(const String &input, const String &searchName);
     bool sendHttps(const String &output, const String &endpoint, String &result);
-    // MQTT
+    void getConfig();
+
+    // ── TCP MQTT (PubSubClient) ───────────────
     void mqttConnect();
     void mqttCallback(char *topic, byte *payload, unsigned int length);
-    String makeTopic(const String &subtopic);
     void subscribeToDeviceTopics();
+
+    // ── MQTT-over-WebSocket (MQTTWebSocket) ───
+    MQTTWebSocket *mqttWS = nullptr; // ← replaces SimpleStomp*
+    bool wsSubscribed = false;
+    void wsConnect();
+
+    // ── Shared helpers ────────────────────────
+    void publish(const String &topic, const String &payload, bool retained = false);
+    String makeTopic(const String &subtopic);
     String serializeJsonDoc(JsonDocument &doc);
     JsonDocument parseString(String str);
 
-    /* Transport */
     PubSubTransport transport = TRANSPORT_MQTT;
     bool USE_HTTPS = false;
     bool USE_SERVER_CREDS = false;
-    /* WSS */
-    SimpleStomp* simpleStomp = nullptr;
-    bool wsConnected = false;
-    void wsConnect();
-    void handleWSSMessage(String msg);
-
-    void publish(const String &topic, const String &payload, bool retained = false);
 };
 
 #endif
