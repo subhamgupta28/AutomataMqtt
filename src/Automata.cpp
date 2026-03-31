@@ -56,6 +56,7 @@ void Automata::publish(const String &topic,
                        const String &payload,
                        bool retained)
 {
+    // Serial.println("[Automata] Publishing to " + topic);
     if (transport == TRANSPORT_MQTT)
     {
         mqttClient.publish(topic.c_str(), payload.c_str(), retained);
@@ -279,7 +280,7 @@ void Automata::begin()
 
     xTaskCreate([](void *params)
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
-                "keepWiFiAlive", 16384, this, 3, NULL);
+                "keepWiFiAlive", 12384, this, 3, NULL);
 }
 
 void Automata::getConfig()

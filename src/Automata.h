@@ -241,6 +241,7 @@ public:
     void delayedUpdate(HandleDelay hd);
     void handleUpdate(const String &msg);
     void handleAction(const String &msg);
+    bool isConnected();
     /* Transport selection */
     void useMQTT();
     void useWSS();
