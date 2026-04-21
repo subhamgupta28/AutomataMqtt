@@ -414,6 +414,8 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
         JsonDocument ack;
         ack["key"] = "actionAck";
         ack["actionAck"] = "Success";
+        ack["status"] = "ok";
+        ack["_cid"] = action.data["_cid"] | "";
         String ackStr;
         serializeJson(ack, ackStr);
 
@@ -447,7 +449,7 @@ void Automata::subscribeToDeviceTopics()
     JsonDocument doc;
     doc["status"] = "offline";
     String payload = serializeJsonDoc(doc);
-    mqttClient.publish("automata/status", payload.c_str(), true);
+    mqttClient.publish("status", payload.c_str(), true);
 }
 
 // ─── makeTopic ───────────────────────────────────────────────
@@ -461,10 +463,7 @@ void Automata::subscribeToDeviceTopics()
 // ─────────────────────────────────────────────────────────────
 String Automata::makeTopic(const String &subtopic)
 {
-    if (transport == TRANSPORT_MQTT)
-        return subtopic;
-
-    return mqttBaseTopic + "/" + subtopic;
+    return subtopic;
 }
 
 // ─── sendLive / sendData / sendAction ────────────────────────
