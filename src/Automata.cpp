@@ -411,10 +411,11 @@ void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
 
         bool rebootFlag = action.data["reboot"] | false;
 
-        JsonDocument ack;
+        JsonDocument ack = action.data; // echo back the same data for reference
         ack["key"] = "actionAck";
         ack["actionAck"] = "Success";
         ack["status"] = "ok";
+        ack["device_id"] = deviceId;
         ack["_cid"] = action.data["_cid"] | "";
         String ackStr;
         serializeJson(ack, ackStr);
