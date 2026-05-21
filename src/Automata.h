@@ -15,9 +15,11 @@
 #include <vector>
 #include <ESPmDNS.h>
 #include "MQTTWebSocket.h" // ← replaces SimpleStomp.h
-
+#include <esp_task_wdt.h>
 #define USE_WEBSERVER 1
 #define USE_REGISTER_DEVICE 1
+
+#define WDT_TIMEOUT 35 // seconds
 
 #ifndef USE_WEBSERVER
 #define USE_WEBSERVER 1
@@ -29,22 +31,22 @@
 
 struct Action
 {
-    JsonDocument data;
+  JsonDocument data;
 };
 
 enum PubSubTransport
 {
-    TRANSPORT_MQTT,
-    TRANSPORT_WSS
+  TRANSPORT_MQTT,
+  TRANSPORT_WSS
 };
 
 struct Attribute
 {
-    String key;
-    String displayName;
-    String unit;
-    String type;
-    JsonDocument extras;
+  String key;
+  String displayName;
+  String unit;
+  String type;
+  JsonDocument extras;
 };
 
 const char index_html[] PROGMEM = R"rawliteral(
@@ -616,100 +618,107 @@ const char index_html[] PROGMEM = R"rawliteral(
 class Automata
 {
 public:
-    using HandleAction = std::function<void(Action)>;
-    using HandleDelay = std::function<void(void)>;
+  using HandleAction = std::function<void(Action)>;
+  using HandleDelay = std::function<void(void)>;
 
-    Automata(String deviceName, String category = "", const char *HOST = "", int PORT = 0);
-    Automata(String deviceName, String category = "", const char *HOST = "", int PORT = 0,
-             const char *MQTT_HOST = "", int MQTT_PORT = 0);
+  Automata(String deviceName, String category = "", const char *HOST = "", int PORT = 0);
+  Automata(String deviceName, String category = "", const char *HOST = "", int PORT = 0,
+           const char *MQTT_HOST = "", int MQTT_PORT = 0);
 
-    void begin();
-    Preferences getPreferences();
-    void addAttribute(String key, String displayName, String unit,
-                      String type = "INFO", JsonDocument extras = JsonDocument());
-    void registerDevice();
-    void sendLive(JsonDocument data);
-    void sendData(JsonDocument doc);
-    void sendAction(JsonDocument doc);
-    void onActionReceived(HandleAction cb);
-    void handleError(String error);
-    void wsSubscribeTopics();
-    void delayedUpdate(HandleDelay hd);
-    void handleUpdate(const String &msg);
-    void handleAction(const String &msg);
-    bool isConnected();
-    void useMQTT();
-    void useWSS();
-    void useCreds();
-    void useHTTPS();
-    int getDelay();
+  void begin();
+  Preferences getPreferences();
+  void addAttribute(String key, String displayName, String unit,
+                    String type = "INFO", JsonDocument extras = JsonDocument());
+  void registerDevice();
+  void sendLive(JsonDocument data);
+  void sendData(JsonDocument doc);
+  void sendAction(JsonDocument doc);
+  void onActionReceived(HandleAction cb);
+  void handleError(String error);
+  void wsSubscribeTopics();
+  void delayedUpdate(HandleDelay hd);
+  void handleUpdate(const String &msg);
+  void handleAction(const String &msg);
+  bool isConnected();
+  void useMQTT();
+  void useWSS();
+  void useCreds();
+  void useHTTPS();
+  void useWebServer();
+  int getDelay();
+  AsyncWebServer &getWebserver();
 
-    static Automata *instance;
+  static Automata *instance;
 
 private:
-    void loop();
-    void configureWiFi();
-    String getMacAddress();
-    void handleWebServer();
-    void useServerCreds();
+  void loop();
+  void configureWiFi();
+  String getMacAddress();
+  void handleWebServer();
+  void useServerCreds();
 
-    String deviceName;
-    String category;
-    const char *HOST;
-    int PORT;
-    const char *MQTT_HOST;
-    int MQTT_PORT;
-    String deviceId;
-    String macAddr;
-    bool isDeviceRegistered = false;
+  String deviceName;
+  String category;
+  const char *HOST;
+  int PORT;
+  const char *MQTT_HOST;
+  int MQTT_PORT;
+  String deviceId;
+  String macAddr;
+  bool webserverEnabled = false;
+  bool isDeviceRegistered = false;
 
-    Preferences preferences;
-    WiFiMulti wifiMulti;
-    AsyncWebServer server;
-    AsyncEventSource events;
-    WiFiClient espClient;
-    PubSubClient mqttClient;
+  Preferences preferences;
+  WiFiMulti wifiMulti;
+  AsyncWebServer server;
+  AsyncEventSource events;
+  WiFiClient espClient;
+  PubSubClient mqttClient;
+  volatile uint32_t lastLoopTick = 0;
 
-    String mqttBaseTopic = "topic";
-    const char *mqttUser = "admin";
-    const char *mqttPassword = "admin";
+  unsigned long wifiLostTime = 0;
+  bool wifiWasConnected = false;
 
-    HandleAction _handleAction = nullptr;
-    HandleDelay _handleDelay = nullptr;
+  String mqttBaseTopic = "topic";
+  const char *mqttUser = "admin";
+  const char *mqttPassword = "admin";
 
-    std::vector<Attribute> attributeList;
-    unsigned long previousMillis = 0;
-    int d = 60000;
-    const char *ntpServer = "pool.ntp.org";
+  HandleAction _handleAction = nullptr;
+  HandleDelay _handleDelay = nullptr;
 
-    // ── Helpers ──────────────────────────────
-    String convertToLowerAndUnderscore(String input);
-    char toLowerCase(char c);
-    void keepWiFiAlive();
-    void setOTA();
-    bool sendHttp(const String &output, const String &endpoint, String &result);
-    bool sendHttps(const String &output, const String &endpoint, String &result);
-    void getConfig();
+  std::vector<Attribute> attributeList;
+  unsigned long previousMillis = 0;
+  int d = 60000;
+  const char *ntpServer = "pool.ntp.org";
 
-    // ── TCP MQTT (PubSubClient) ───────────────
-    void mqttConnect();
-    void mqttCallback(char *topic, byte *payload, unsigned int length);
-    void subscribeToDeviceTopics();
+  // ── Helpers ──────────────────────────────
+  String convertToLowerAndUnderscore(String input);
+  char toLowerCase(char c);
+  void keepWiFiAlive();
+  void setOTA();
+  bool sendHttp(const String &output, const String &endpoint, String &result);
+  bool sendHttps(const String &output, const String &endpoint, String &result);
+  void getConfig();
 
-    // ── MQTT-over-WebSocket (MQTTWebSocket) ───
-    MQTTWebSocket *mqttWS = nullptr; // ← replaces SimpleStomp*
-    bool wsSubscribed = false;
-    void wsConnect();
+  // ── TCP MQTT (PubSubClient) ───────────────
+  void mqttConnect();
+  void mqttCallback(char *topic, byte *payload, unsigned int length);
+  void subscribeToDeviceTopics();
 
-    // ── Shared helpers ────────────────────────
-    void publish(const String &topic, const String &payload, bool retained = false);
-    String makeTopic(const String &subtopic);
-    String serializeJsonDoc(JsonDocument &doc);
-    JsonDocument parseString(String str);
+  // ── MQTT-over-WebSocket (MQTTWebSocket) ───
+  MQTTWebSocket *mqttWS = nullptr; // ← replaces SimpleStomp*
+  bool wsSubscribed = false;
+  void wsConnect();
 
-    PubSubTransport transport = TRANSPORT_MQTT;
-    bool USE_HTTPS = false;
-    bool USE_SERVER_CREDS = false;
+  // ── Shared helpers ────────────────────────
+  void publish(const String &topic, const String &payload, bool retained = false);
+  String makeTopic(const String &subtopic);
+  String serializeJsonDoc(JsonDocument &doc);
+  JsonDocument parseString(String str);
+
+  PubSubTransport transport = TRANSPORT_MQTT;
+  bool USE_HTTPS = false;
+  bool USE_SERVER_CREDS = false;
 };
 
 #endif

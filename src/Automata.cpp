@@ -39,6 +39,11 @@ Automata::Automata(String deviceName, String category,
     instance = this;
 }
 
+AsyncWebServer &Automata::getWebserver()
+{
+    return server;
+}
+
 // ─── Transport selection ─────────────────────────────────────
 void Automata::useHTTPS() { USE_HTTPS = true; }
 void Automata::useCreds() { USE_SERVER_CREDS = true; }
@@ -163,6 +168,8 @@ void Automata::handleAction(const String &msg)
 // ─── begin() ─────────────────────────────────────────────────
 void Automata::begin()
 {
+    esp_task_wdt_init(WDT_TIMEOUT, true);
+    // esp_task_wdt_add(NULL);
     WiFi.mode(WIFI_STA);
     WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
     WiFi.setHostname(convertToLowerAndUnderscore(deviceName).c_str());
@@ -173,12 +180,16 @@ void Automata::begin()
     wifiMulti.addAP("wifi_NET", "444555666");
     macAddr = getMacAddress();
     getConfig();
-
     xTaskCreate([](void *params)
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
-                "keepWiFiAlive", 12384, this, 3, NULL);
+                "keepWiFiAlive", 10384, this, 3, NULL);
 }
-
+bool Automata::isConnected() {
+    if (transport == TRANSPORT_MQTT)
+        return mqttClient.connected();
+    else
+        return mqttWS && mqttWS->connected();
+}
 void Automata::getConfig()
 {
     String sv = preferences.getString("config", "");
@@ -197,8 +208,9 @@ void Automata::getConfig()
 // ─── loop() ──────────────────────────────────────────────────
 void Automata::loop()
 {
+    esp_task_wdt_reset();
     unsigned long currentMillis = millis();
-
+    lastLoopTick = millis();
     // ── TCP MQTT path ─────────────────────────
     if (transport == TRANSPORT_MQTT)
     {
@@ -242,21 +254,42 @@ void Automata::loop()
         registerDevice();
         regTime = currentMillis;
     }
+
+    // if (ESP.getFreeHeap() < 12000)
+    // {
+    //     Serial.printf(
+    //         "[Automata] Low heap: %u bytes\n",
+    //         ESP.getFreeHeap());
+
+    //     ESP.restart();
+    // }
 }
 
 // ─── keepWiFiAlive (FreeRTOS task) ───────────────────────────
 void Automata::keepWiFiAlive()
 {
+    esp_task_wdt_add(NULL);
     const TickType_t delayConnected = pdMS_TO_TICKS(30000);
     const TickType_t delayDisconnected = pdMS_TO_TICKS(5000);
-
+    unsigned long wifiLostSince = 0;
     for (;;)
     {
+        if ((millis() - lastLoopTick) > 30000)
+        {
+            Serial.println(
+                "[Automata] Main loop frozen. Restarting.");
+
+            ESP.restart();
+        }
+        esp_task_wdt_reset();
         if (WiFi.status() != WL_CONNECTED)
         {
+            if (wifiLostSince == 0)
+                wifiLostSince = millis();
             Serial.println("[Automata] WiFi not connected, trying...");
             if (wifiMulti.run() == WL_CONNECTED)
             {
+                wifiLostSince = 0;
                 Serial.println("[Automata] WiFi connected: " + WiFi.localIP().toString());
 
                 if (USE_REGISTER_DEVICE)
@@ -277,12 +310,18 @@ void Automata::keepWiFiAlive()
             }
             else
             {
+                if ((millis() - wifiLostSince) > 60000)
+                {
+                    Serial.println("[Automata] WiFi dead for 60s. Restarting...");
+                    ESP.restart();
+                }
                 Serial.println("[Automata] WiFi retry...");
                 vTaskDelay(delayDisconnected);
             }
         }
         else
         {
+            wifiLostSince = 0;
             loop();
         }
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -374,19 +413,34 @@ void Automata::mqttConnect()
 
     if (!mqttClient.connected())
     {
+        static unsigned long mqttFailStart = 0;
+
+        if (mqttFailStart == 0)
+            mqttFailStart = millis();
         String clientId = "automata-" + convertToLowerAndUnderscore(deviceName) + "-" + macAddr;
         Serial.printf("[Automata] MQTT connecting as: %s\n", clientId.c_str());
 
         if (mqttClient.connect(clientId.c_str(), mqttUser, mqttPassword))
         {
+            mqttFailStart = 0;
             Serial.println("[Automata] MQTT connected");
             subscribeToDeviceTopics();
         }
         else
         {
+            if ((millis() - mqttFailStart) > 120000)
+            {
+                Serial.println("[Automata] MQTT failed for 2 minutes");
+                ESP.restart();
+            }
             Serial.printf("[Automata] MQTT failed, state=%d\n", mqttClient.state());
         }
     }
+}
+
+void Automata::useWebServer()
+{
+    webserverEnabled = true;
 }
 
 void Automata::mqttCallback(char *topic, byte *payload, unsigned int length)
@@ -595,8 +649,8 @@ void Automata::useServerCreds()
 
 bool Automata::sendHttps(const String &output, const String &endpoint, String &result)
 {
-    static WiFiClientSecure client;
-    static HTTPClient http;
+    WiFiClientSecure client;
+    HTTPClient http;
     result = "";
 
     String url = "https://" + String(HOST) + "/api/v1/main/" + endpoint;
