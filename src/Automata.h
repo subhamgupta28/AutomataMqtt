@@ -680,8 +680,8 @@ private:
   bool wifiWasConnected = false;
 
   String mqttBaseTopic = "topic";
-  const char *mqttUser = "admin";
-  const char *mqttPassword = "admin";
+  const char *mqttUser = "automata";
+  const char *mqttPassword = "adminautomata12345678";
 
   HandleAction _handleAction = nullptr;
   HandleDelay _handleDelay = nullptr;
@@ -690,6 +690,8 @@ private:
   unsigned long previousMillis = 0;
   int d = 60000;
   const char *ntpServer = "pool.ntp.org";
+  String jwtToken;
+  String deviceSecret;
 
   // ── Helpers ──────────────────────────────
   String convertToLowerAndUnderscore(String input);
@@ -698,6 +700,7 @@ private:
   void setOTA();
   bool sendHttp(const String &output, const String &endpoint, String &result);
   bool sendHttps(const String &output, const String &endpoint, String &result);
+  bool loginDevice();
   void getConfig();
 
   // ── TCP MQTT (PubSubClient) ───────────────

@@ -148,8 +148,10 @@ void Automata::handleUpdate(const String &msg)
     Serial.println("[Automata] Update received: " + output);
 
     deviceId = resp["id"].as<String>();
+    deviceSecret = resp["deviceSecret"].as<String>();
     preferences.putString("deviceId", deviceId);
     preferences.putString("config", output);
+    preferences.putString("deviceSecret", deviceSecret);
     getConfig();
 }
 
@@ -184,7 +186,8 @@ void Automata::begin()
                 { static_cast<Automata *>(params)->keepWiFiAlive(); },
                 "keepWiFiAlive", 10384, this, 3, NULL);
 }
-bool Automata::isConnected() {
+bool Automata::isConnected()
+{
     if (transport == TRANSPORT_MQTT)
         return mqttClient.connected();
     else
@@ -193,6 +196,7 @@ bool Automata::isConnected() {
 void Automata::getConfig()
 {
     String sv = preferences.getString("config", "");
+    deviceSecret = preferences.getString("deviceSecret", "");
     if (sv != "")
     {
         Serial.println("[Automata] Config found in preferences: " + sv);
@@ -646,7 +650,28 @@ void Automata::useServerCreds()
         MQTT_PORT = resp["MQTT_PORT"].as<int>();
     }
 }
+bool Automata::loginDevice()
+{
+    JsonDocument doc;
 
+    doc["macAddr"] = macAddr;
+    doc["deviceSecret"] = deviceSecret;
+
+    String req;
+    serializeJson(doc, req);
+
+    String response;
+
+    if(!sendHttps(req, "device/login", response))
+        return false;
+
+    JsonDocument resp;
+    deserializeJson(resp, response);
+
+    jwtToken = resp["token"].as<String>();
+
+    return true;
+}
 bool Automata::sendHttps(const String &output, const String &endpoint, String &result)
 {
     WiFiClientSecure client;
@@ -661,10 +686,16 @@ bool Automata::sendHttps(const String &output, const String &endpoint, String &r
     http.addHeader("Content-Type", "application/json");
     http.setTimeout(10000);
     int code = http.POST(output);
+    Serial.printf("[HTTP] Response code: %d\n", code);
     if (code > 0)
+    {
         result = http.getString();
+        Serial.printf("[HTTP] Response: %s\n", result.c_str());
+    }
     else
-        Serial.printf("[HTTP] POST failed: %s\n", http.errorToString(code).c_str());
+    {
+        Serial.printf("[HTTP] Error: %s\n", http.errorToString(code).c_str());
+    }
     http.end();
     return (code >= 200 && code < 300);
 }
